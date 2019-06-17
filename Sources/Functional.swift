@@ -79,7 +79,7 @@ infix operator >>>: ForwardComposition //  g(f(a)) or f(a) -> g(a) -> h(a)
 /**
  "Backward Composition" Operator
  */
-infix operator <<<: BackwardsComposition //  g(f(a)) or f(a) -> g(a) -> h(a)
+infix operator <<<: BackwardsComposition //  f(g(a)) or g(a) -> f(a) -> h(a)
 /**
  "Effect-ful" Composition Operator or "Fish" Operator
  */
@@ -90,6 +90,11 @@ infix operator >=>: EffectfulComposition//  g(f(a)) or f(a) -> g(a) -> h(a) with
 infix operator <>: SingleTypeComposition // f(a) -> f(a)
 
 
+// MARK: - Prefix Operators
+/**
+ "Get" Prefix Operator
+ */
+prefix operator ^
 
 
 // MARK: - Generic Operator Implementations
@@ -357,6 +362,21 @@ public func curry <A, B, C>(_ f: @escaping (A) -> (B) -> C) -> (A, B) -> C {
     }
 }
 
+
+/**
+ 2 Parameter "Uncurry" Function - The opposite of the Curry Function
+ 
+ - Parameters:
+ - f: a function that goes from generic A to a function from generic B to generic C
+ - Returns: a function that goes from a tuple of a generic A and B to a generic C
+ 
+ - Note: Motivation: When we have a function with multiple parameters, it doesn't compose well with `>>>`, our forward composition operator. Currying mutates the multi-parameter function so that it plays nicer with our exisiting function composition code. It is possible to "Curry" more than two values. When we want reverse a curry operation, we can use uncurry!
+ */
+func uncurry<A, B, C>(_ f: @escaping (A) -> (B) -> C) -> (A, B) -> C {
+    return { a, b in f(a)(b) }
+}
+
+
 /**
  Flip a Function
  
@@ -408,6 +428,10 @@ public func zurry<A>(_ f: () -> A) -> A {
     return f()
 }
 
+
+
+
+
 /**
  Free Map Function - A generic implementation of the array map.
  
@@ -419,6 +443,20 @@ public func zurry<A>(_ f: () -> A) -> A {
  
  */
 public func map<A, B>(_ f: @escaping (A) -> B) -> ([A]) -> [B] {
+    return { $0.map(f) }
+}
+
+/**
+ Free Map Function - A generic implementation of the optionals map.
+ 
+ - Parameters:
+ - f: a (@escaping) function named (internally) f that goes from a generic A to a generic B
+ - Returns: a function that goes from a generic Optional A to a generic Optional B.
+ 
+ - Note: Motivation: We get to use map without having to have any data to deal with.
+ 
+ */
+public func map<A, B>(_ f: @escaping (A) -> B) -> (A?) -> B? {
     return { $0.map(f) }
 }
 
@@ -459,10 +497,12 @@ public func reduce<A, R>(_ accumulator: @escaping (R, A) -> R) -> (R) -> ([A]) -
 
 
 /**
+ "First Component of a Tuple Transformation", a generic way of transforming the first component of a tuple.
  
- 
- - Note: Motivation: In the applications that we write, we are often diving into deep, complex data structures and do something to one of the values. We could define a function that always does an operation for a particular position, such as increment first. **Universal Fact** Setter Composition composes backwards.
- 
+ - Parameters:
+ - f: a (@escaping) function from a generic A to a generic C.
+ - Returns: a function from the tuple of generic A and B to the tuple of generic C and B.
+ - Note: Motivation: In the applications that we write, we are often diving into deep, complex data structures and do something to one of the values. We could define a function that always does an operation for a particular position, such as increment first. **Universal Fact** Setter Composition composes backwards. We want a super general way of transforming the first component of a tuple. This function 'lifts' a transformation of (A) -> C up into the world of transformations on tuples, by applying it to the first component. "Functional setters automate these cumbersome transformations into simpler, composable units that hide all that boilerplate."
  
  */
 func first<A, B, C>(_ f: @escaping (A) -> C) -> ((A, B)) -> (C, B) {
@@ -471,9 +511,179 @@ func first<A, B, C>(_ f: @escaping (A) -> C) -> ((A, B)) -> (C, B) {
     }
 }
 
-
+/**
+ "Second Component of a Tuple Transformation", a generic way of transforming the second component of a tuple.
+ 
+ - Parameters:
+ - f: a (@escaping) function from a generic B to a generic C.
+ - Returns: a function from the tuple of generic A and B to the tuple of generic A and C.
+ - Note: Motivation: In the applications that we write, we are often diving into deep, complex data structures and do something to one of the values. We could define a function that always does an operation for a particular position, such as increment second. **Universal Fact** Setter Composition composes backwards. We want a super general way of transforming the second component of a tuple. This function 'lifts' a transformation of (B) -> C up into the world of transformations on tuples, by applying it to the second component. "Functional setters automate these cumbersome transformations into simpler, composable units that hide all that boilerplate."
+ 
+ */
 func second<A, B, C>(_ f: @escaping (B) -> C) -> ((A, B)) -> (A, C) {
     return { pair in
         return (pair.0, f(pair.1))
+    }
+}
+
+
+
+/**
+ "Property KeyPath Lifter for Setters" - A helper that lifts a writable key path up into a world that transforms the root of the key path for setter operations.
+ 
+ - Parameters:
+ - kp: a WriteableKeyPath with base of a generic type named Root and a value of generic type Value.
+ - Returns: a transformation that goes from an @escaping function of the form (Value) -> Value to a function from (Root) -> (Root).
+ - Note: Motivation: Prop provides the mechanisms we need to generalized functional setters for structs, leveraging the compiler-built setters.
+ 
+ */
+func prop<Root, Value>(_ kp: WritableKeyPath<Root, Value>) -> (@escaping (Value) -> Value) -> (Root) -> Root {
+    return { update in
+        { root in
+            var copy = root
+            copy[keyPath: kp] = update(copy[keyPath: kp])
+            return copy
+        }
+    }
+}
+
+/**
+ "Property KeyPath Lifter for Getters" - A helper that lifts a writable key path up into a world that transforms the root of the key path for setter operations.
+ 
+ - Parameters:
+ - kp: a WriteableKeyPath with base of a generic type named Root and a value of generic type Value.
+ - Returns: a simple function that goes from a generic Root to a generic Value.
+ - Note: Motivation: We want the ability to generically get properties out of objects. Get provides the mechanisms we need to generalized functional getters for structs, leveraging the compiler-built getters. Since getters can be thought of as functions that focus on a part of a larger structure, they can be thought of as a very basic transformation function.
+ 
+ - Remark: ```swift
+ // get(\User.id) // (User) -> Int
+ // get(\User.id) >>> String.init
+ // (User) -> String
+ 
+ // Swift generates key paths for these computed properties, as well!
+ 
+ extension User {
+ var isStaff: Bool {
+ return self.email.hasSuffix("@pointfree.co")
+ }
+ }
+ 
+ // \User.isStaff // KeyPath<User, Bool>
+ // get(\User.isStaff) // (User) -> Bool
+ 
+ // users
+ //   .map(get(\.email.count)) // [17, 33, 13, 26]
+ // users
+ //   .filter((!) <<< get(\.isStaff))
+ ```
+ 
+ */
+func get<Root, Value>(_ kp: KeyPath<Root, Value>) -> (Root) -> Value {
+    return { root in
+        root[keyPath: kp]
+    }
+}
+
+/**
+ "Property KeyPath Lifter for Getters" - A helper that lifts a writable key path up into a world that transforms the root of the key path for setter operations.
+ 
+ - Parameters:
+ - kp: a WriteableKeyPath with base of a generic type named Root and a value of generic type Value.
+ - Returns: a simple function that goes from a generic Root to a generic Value.
+ - Note: Motivation: We want the ability to generically get properties out of objects. Get provides the mechanisms we need to generalized functional getters for structs, leveraging the compiler-built getters. Since getters can be thought of as functions that focus on a part of a larger structure, they can be thought of as a very basic transformation function.
+ 
+ - Remark: ```swift
+ // get(\User.id) // (User) -> Int
+ // get(\User.id) >>> String.init
+ // (User) -> String
+ 
+ // Swift generates key paths for these computed properties, as well!
+ 
+ extension User {
+ var isStaff: Bool {
+ return self.email.hasSuffix("@pointfree.co")
+ }
+ }
+ 
+ // \User.isStaff // KeyPath<User, Bool>
+ // ^\User.isStaff // (User) -> Bool
+ 
+ // users
+ //   .map(^\.email.count) // [17, 33, 13, 26]
+ // users
+ //   .filter((!) <<< ^\.isStaff)
+ ```
+ 
+ */
+prefix func ^ <Root, Value>(kp: KeyPath<Root, Value>) -> (Root) -> Value {
+    return get(kp)
+}
+
+
+func their<Root, Value>(
+    _ f: @escaping (Root) -> Value,
+    _ g: @escaping (Value, Value) -> Bool
+    )
+    -> (Root, Root)
+    -> Bool {
+        
+        return { g(f($0), f($1)) }
+}
+
+
+func their<Root, Value: Comparable>(
+    _ f: @escaping (Root) -> Value
+    )
+    -> (Root, Root)
+    -> Bool {
+        
+        return their(f, <)
+}
+
+func combining<Root, Value>(
+    _ f: @escaping (Root) -> Value,
+    by g: @escaping (Value, Value) -> Value
+    )
+    -> (Value, Root)
+    -> Value {
+        
+        return { value, root in
+            g(value, f(root)) }
+}
+
+
+func from<A>(_ x: Void) -> (Never) -> A {
+    return { never in
+        switch never {
+            
+        }
+    }
+}
+
+// Some languages even they give this function a name! They call it
+func absurd<A>(_ never: Never) -> A {
+    switch never {}
+}
+
+
+
+func unthrow<A, B>(_ f: @escaping (A) throws -> B) -> (A) -> Result<B, Error> {
+    return { a in
+        do {
+            return .success(try f(a))
+        } catch {
+            return .failure(error)
+        }
+    }
+}
+
+func throwing<A, B>(_ f: @escaping (A) -> Result<B, Error>) -> (A) throws -> B {
+    return { a in
+        switch f(a) {
+        case let .failure(error):
+            throw error
+        case let .right(b):
+            return b
+        }
     }
 }
